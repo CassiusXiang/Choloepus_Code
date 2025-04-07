@@ -34,6 +34,7 @@ const int left_hand = 1;
 
 // 角度设置变量
 float target = 0; // 目标
+float angle_limit = 75;
 
 // 命令解释器的初始化
 Commander command = Commander(Serial);
@@ -101,7 +102,16 @@ void Task1code(void *pvParameters)
         // velocity, position or voltage (defined in motor.controller)
         // this function can be run at much lower frequency than loopFOC() function
         // You can also use motor.move() and set the motor.target in the code
-        motor.move(left_hand * target);
+        // 检查当前电机角度是否超过限制
+        if (motor.shaft_angle > angle_limit) {
+            // 超过限制时，切换到力矩控制并停止电机
+            motor.controller = MotionControlType::torque;
+            target = 0;
+            Serial.println("角度超过限制，电机已停止。");
+        } else {
+            // 未超过限制时，继续正常运动
+            motor.move(left_hand * target);
+        }
 
         // function intended to be used with serial plotter to monitor motor variables
         // significantly slowing the execution down!!!!
@@ -111,7 +121,7 @@ void Task1code(void *pvParameters)
         // user communication
         // command.run();
 
-        // vTaskDelay(1 / portTICK_PERIOD_MS);
+        vTaskDelay(1 / portTICK_PERIOD_MS);
     }
 }
 

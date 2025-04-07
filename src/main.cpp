@@ -15,9 +15,6 @@
 #include <cstdint>
 #include <cstring>
 
-// 任务句柄
-TaskHandle_t Task1;
-TaskHandle_t Task2;
 // I2C 磁编码器实例初始化
 MagneticSensorI2C sensor = MagneticSensorI2C(AS5600_I2C);
 
@@ -30,11 +27,12 @@ BLDCDriver3PWM driver = BLDCDriver3PWM(25, 26, 27, 33); // 绑定三相电机驱
 // const int RX1 = 17;
 
 // dirction
-const int left_hand = 1;
+const int left_hand = -1;
 
 // 角度设置变量
 float target = 0; // 目标
-float angle_limit = 75;
+float angle_limit = 100;
+int counter = 0;
 
 // 命令解释器的初始化
 Commander command = Commander(Serial);
@@ -84,99 +82,6 @@ bool checkId(const std::vector<uint8_t> &originalVector)
     else
         return false;
 }
-
-// 定义任务函数
-void Task1code(void *pvParameters)
-{ // FOC control
-    // 引脚初始化
-
-    for (;;)
-    {
-        // main FOC algorithm function
-        // the faster you run this function the better
-        // Arduino UNO loop  ~1kHz
-        // Bluepill loop ~10kHz
-        motor.loopFOC();
-
-        // Motion control function
-        // velocity, position or voltage (defined in motor.controller)
-        // this function can be run at much lower frequency than loopFOC() function
-        // You can also use motor.move() and set the motor.target in the code
-        // 检查当前电机角度是否超过限制
-        if (motor.shaft_angle > angle_limit) {
-            // 超过限制时，切换到力矩控制并停止电机
-            motor.controller = MotionControlType::torque;
-            target = 0;
-            Serial.println("角度超过限制，电机已停止。");
-        } else {
-            // 未超过限制时，继续正常运动
-            motor.move(left_hand * target);
-        }
-
-        // function intended to be used with serial plotter to monitor motor variables
-        // significantly slowing the execution down!!!!
-        // motor.monitor();
-        // if (motor.)
-
-        // user communication
-        // command.run();
-
-        vTaskDelay(1 / portTICK_PERIOD_MS);
-    }
-}
-
-void Task2code(void *pvParameters)
-{
-    vTaskDelay(1000 / portTICK_PERIOD_MS); // 等待主控制程序启动
-    Serial.println("setting...");
-    motor.controller = MotionControlType::torque;
-    target = 1.4;
-    vTaskDelay(5000 / portTICK_PERIOD_MS); // 初始化
-    target = 0;
-    motor.sensor_offset = -sensor.getAngle();
-    Serial.println("setting success");
-
-    int serp = 0;
-
-    for (;;) // 命令解码器
-    {
-        if (Serial1.available() >= 16) {        
-            std::vector<uint8_t> data(16);
-            Serial1.readBytes(data.data(), 16);
-            if (data[7] == 0x14) {
-                uint8_t mode = data[8];
-                uint16_t value = (data[9] << 8) | data[10];
-                switch (mode) {
-                    case 0: // 初始化
-                        motor.controller = MotionControlType::torque;
-                        target = 1.4;
-                        vTaskDelay(5000 / portTICK_PERIOD_MS);
-                        target = 0;
-                        motor.sensor_offset = -sensor.getAngle();
-                        break;
-                    case 1: // 力矩控制
-                        motor.controller = MotionControlType::torque;
-                        target = static_cast<float>(value) / 100.0;
-                        break;
-                    case 2: // 角度控制
-                        motor.controller = MotionControlType::angle;
-                        target = -static_cast<float>(value) / 100.0;
-                        break;
-                    case 3: // 角度控制带力矩限制
-                        float angle_target = -static_cast<float>(value) / 100.0;
-                        uint16_t voltage_limit_value = (data[11] << 8) | data[12];
-                        float voltage_limit = static_cast<float>(voltage_limit_value) / 100.0;
-                        motor.controller = MotionControlType::angle;
-                        target = angle_target;
-                        motor.voltage_limit = voltage_limit;
-                        break;
-                }
-            }
-        }
-        vTaskDelay(3 / portTICK_PERIOD_MS);
-    }
-}
-
 void setup()
 {
 
@@ -215,7 +120,7 @@ void setup()
     // maximal velocity of the position control
     motor.velocity_limit = 12;
 
-    motor.sensor_offset = 1.78;              // Set the zero electrical angle
+    // motor.sensor_offset = 1.78;              // Set the zero electrical angle
     motor.sensor_direction = Direction::CCW; // Set the sensor direction to counter-clockwise
 
     // use monitoring with serial
@@ -230,38 +135,59 @@ void setup()
     // align sensor and start FOC
     // motor.();
     motor.initFOC();
-    // motor.initFOC(4.56, Direction::CW);
-    // motor.initFOC(2.25, Direction::CCW);
-    // 需要增加跳过矫正 参考http://simplefoc.cn/#/simplefoc_translation/3.3%E4%BB%A3%E7%A0%81/3.3.2%E7%94%B5%E6%9C%BA%E9%85%8D%E7%BD%AE%E4%BB%A3%E7%A0%81/3.3.2.1%E6%97%A0%E5%88%B7%E7%9B%B4%E6%B5%81%E7%94%B5%E6%9C%BA
 
-    // add target command T
-    // command.add('T', doTarget, "target angle");
-    // command.add('M', onMotor, "my motor");
+    _delay(100); // 等待主控制程序启动
 
     Serial.println(F("Motor ready"));
-
-    _delay(1000);
-
-    // 创建任务
-    xTaskCreatePinnedToCore(
-        Task1code, /* 任务函数 */
-        "Task1",   /* 任务名字 */
-        50000,     /* 栈大小 */
-        NULL,      /* 传递给任务函数的参数 */
-        1,         /* 优先级 */
-        &Task1,    /* 任务句柄 */
-        0);        /* 核心编号 */
-    xTaskCreatePinnedToCore(
-        Task2code,
-        "Task2",
-        50000,
-        NULL,
-        1,
-        &Task2,
-        1);
 }
 
 void loop()
 {
-    // nothing
+    motor.loopFOC();
+    if(counter < 5000){
+        counter = counter + 1;
+        motor.controller = MotionControlType::torque;
+        motor.move(1.5);
+        if(counter == 5000) motor.sensor_offset = -sensor.getAngle();
+    }
+    else {
+        if (left_hand * motor.shaft_angle > angle_limit) {
+            // 超过限制时，切换到力矩控制并停止电机
+            motor.controller = MotionControlType::torque;
+            target = 0;
+        } else {
+            // 未超过限制时，继续正常运动
+            motor.move(target);
+        }
+        // Serial.println(motor.shaft_angle);
+        if (Serial1.available() >= 16) {        
+            std::vector<uint8_t> data(16);
+            Serial1.readBytes(data.data(), 16);
+            
+            // if (data[7] == 0x14) {
+            uint8_t mode = data[8];
+            uint16_t value = (data[10] << 8) | data[11];
+            switch (mode) {
+                case 0: // 初始化
+                    break;
+                case 1: // 力矩控制
+                    motor.controller = MotionControlType::torque;
+                    target = left_hand * static_cast<float>(value) / 100.0;
+                    break;
+                case 2: // 角度控制
+                    motor.controller = MotionControlType::angle;
+                    target = left_hand * static_cast<float>(value) / 100.0;
+                    break;
+                case 3: // 角度控制带力矩限制
+                    float angle_target = static_cast<float>(value) / 100.0;
+                    uint16_t voltage_limit_value = (data[12] << 8) | data[13];
+                    float voltage_limit = static_cast<float>(voltage_limit_value) / 100.0;
+                    motor.controller = MotionControlType::angle;
+                    target = left_hand * angle_target;
+                    motor.voltage_limit = voltage_limit;
+                    break;
+                // }
+            }
+        }
+    }
 }

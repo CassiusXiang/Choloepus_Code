@@ -41,8 +41,13 @@ class CholoepusCtrl:
         id_bytes = self.device_id.to_bytes(2, byteorder='big')
         command[6:8] = id_bytes
         command[8] = mode
-        if (value < 0): value = 0
+        if (value < -20): value = -20
         if (value > 90): value = 90
+        if (value < 0):
+            value = -value
+            command[9] = 0
+        else:
+            command[9] = 2
         value_int = int(value * 100)
         value_bytes = value_int.to_bytes(2, byteorder='big', signed=True)
         command[10:12] = value_bytes

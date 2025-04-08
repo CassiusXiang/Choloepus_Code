@@ -1,8 +1,8 @@
 #include <HardwareSerial.h>
 
 void setup() {
-    Serial.begin(115200);
-    Serial1.begin(115200, SERIAL_8N1, 18, 17);
+    Serial.begin(9600);
+    Serial1.begin(9600, SERIAL_8N1, 18, 17);
 }
 
 void loop() {
